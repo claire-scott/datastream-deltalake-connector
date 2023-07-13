@@ -4,7 +4,8 @@ import io.badal.databricks.datastream.{
   DataStreamSchema,
   DatastreamSource,
   MySQL,
-  Oracle
+  Oracle,
+  PostgreSQL
 }
 import io.badal.databricks.delta
 import org.apache.spark.sql.DataFrame
@@ -30,6 +31,11 @@ object TableMetadata {
       DatastreamMetadataColumn("source_metadata.log_file", StringType),
       DatastreamMetadataColumn("source_metadata.log_position", LongType)
     )
+  private[delta] val PGSQL_ORDER_BY_FIELDS =
+    Seq(
+      DatastreamMetadataColumn("source_timestamp", TimestampType),
+      DatastreamMetadataColumn("source_metadata.lsn", StringType)
+    )
 
   def fromDfUnsafe(df: DataFrame): TableMetadata = fromDf(df).get
 
@@ -38,10 +44,17 @@ object TableMetadata {
              dbOverride: Option[String] = None): Option[TableMetadata] = {
     import org.apache.spark.sql.functions._
 
+    var dbname_param = "source_metadata.database"
+
+    if (df.columns.contains(dbname_param)) {
+      // database parameter doesn't exist (Oracle, MySQL) must be PostgreSQL
+      dbname_param = "source_metadata.schema"
+    }
+
     df.select(
         col("read_method").as("read_method"),
         col("source_metadata.table").as("table"),
-        col("source_metadata.database").as("database"),
+        col(dbname_param).as("database"),
         col("source_metadata.primary_keys").as("primary_keys")
       )
       .head(1)
@@ -70,15 +83,17 @@ object TableMetadata {
   private def getSourceTypeFromReadMethod(
       readMethod: String): DatastreamSource =
     readMethod.split("-")(0) match {
-      case "mysql"  => MySQL
-      case "oracle" => Oracle
+      case "mysql"      => MySQL
+      case "oracle"     => Oracle
+      case "postgresql" => PostgreSQL
     }
 
   private def getOrderByFields(
       source: DatastreamSource): Seq[DatastreamMetadataColumn] =
     source match {
-      case MySQL  => MYSQL_ORDER_BY_FIELDS
-      case Oracle => ORACLE_ORDER_BY_FIELDS
+      case MySQL      => MYSQL_ORDER_BY_FIELDS
+      case Oracle     => ORACLE_ORDER_BY_FIELDS
+      case PostgreSQL => PGSQL_ORDER_BY_FIELDS
     }
 
 }
